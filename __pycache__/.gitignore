@@ -1,0 +1,16 @@
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Environments (if you use venv or conda)
+.venv/
+env/
+
+# ML/Data (Crucial for Phase 2)
+*.pgn
+*.pt
+*.pth
+data/
+
+# Streamlit
+.streamlit/
