@@ -1,17 +1,18 @@
 """
 Streamlit Frontend for Chess Engine
-Play against the AI with evaluation bar and analysis
+Play against Heuristic AI or Neural Network AI
 """
 
 import streamlit as st
 import chess
 import chess.svg
 from engine import ChessEngine
+from nn_engine import NNEngine
 from evaluation import evaluate_board, get_evaluation_breakdown
 
 # Page config
 st.set_page_config(
-    page_title="Chess Engine - Minimax AI",
+    page_title="Chess Engine - AI Project",
     page_icon="♟️",
     layout="wide"
 )
@@ -20,21 +21,6 @@ st.set_page_config(
 st.markdown("""
 <style>
     .stApp { max-width: 1400px; margin: 0 auto; }
-    .eval-bar { 
-        width: 30px; 
-        height: 400px; 
-        border: 2px solid #333;
-        border-radius: 4px;
-        position: relative;
-        background: linear-gradient(to top, #1a1a1a 50%, #f0f0f0 50%);
-    }
-    .eval-marker {
-        position: absolute;
-        width: 100%;
-        height: 4px;
-        background: #ff4444;
-        transition: top 0.3s ease;
-    }
     .move-history {
         font-family: monospace;
         max-height: 400px;
@@ -43,40 +29,57 @@ st.markdown("""
         background: #f5f5f5;
         border-radius: 8px;
     }
-    .stats-box {
-        background: #e8f4e8;
-        padding: 15px;
-        border-radius: 8px;
-        margin: 10px 0;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 # Initialize session state
 if 'board' not in st.session_state:
     st.session_state.board = chess.Board()
-if 'engine' not in st.session_state:
-    st.session_state.engine = ChessEngine(max_depth=4, time_limit=5.0)
 if 'move_history' not in st.session_state:
     st.session_state.move_history = []
-if 'evaluation_history' not in st.session_state:
-    st.session_state.evaluation_history = []
 if 'player_color' not in st.session_state:
     st.session_state.player_color = chess.WHITE
 if 'game_started' not in st.session_state:
     st.session_state.game_started = False
 if 'last_engine_stats' not in st.session_state:
     st.session_state.last_engine_stats = None
+if 'engine_type' not in st.session_state:
+    st.session_state.engine_type = "heuristic"
+if 'engine' not in st.session_state:
+    st.session_state.engine = None
+
+
+def get_engine():
+    """Get or create the appropriate engine."""
+    if st.session_state.engine is None:
+        if st.session_state.engine_type == "heuristic":
+            st.session_state.engine = ChessEngine(max_depth=4, time_limit=5.0)
+        else:
+            st.session_state.engine = NNEngine(
+                weights_path="nn/weights.pth", 
+                max_depth=3, 
+                time_limit=5.0,
+                device='cpu'
+            )
+    return st.session_state.engine
 
 
 def reset_game():
     """Reset the game to initial state."""
     st.session_state.board = chess.Board()
     st.session_state.move_history = []
-    st.session_state.evaluation_history = []
     st.session_state.game_started = False
     st.session_state.last_engine_stats = None
-    st.session_state.engine.clear_transposition_table()
+    if hasattr(st.session_state.engine, 'clear_transposition_table'):
+        st.session_state.engine.clear_transposition_table()
+
+
+def switch_engine(new_type):
+    """Switch to a different engine type."""
+    if st.session_state.engine_type != new_type:
+        st.session_state.engine_type = new_type
+        st.session_state.engine = None  # Force recreation
+        reset_game()
 
 
 def make_move(move):
@@ -84,10 +87,6 @@ def make_move(move):
     san = st.session_state.board.san(move)
     st.session_state.board.push(move)
     st.session_state.move_history.append(san)
-    
-    # Record evaluation
-    eval_score = evaluate_board(st.session_state.board)
-    st.session_state.evaluation_history.append(eval_score)
 
 
 def engine_move():
@@ -95,11 +94,15 @@ def engine_move():
     if st.session_state.board.is_game_over():
         return
     
+    engine = get_engine()
+    
     with st.spinner("Engine thinking..."):
-        move, score, depth, stats = st.session_state.engine.iterative_deepening(
-            st.session_state.board
-        )
-        st.session_state.last_engine_stats = stats
+        if st.session_state.engine_type == "heuristic":
+            move, score, depth, stats = engine.iterative_deepening(st.session_state.board)
+            st.session_state.last_engine_stats = stats
+        else:
+            move, score, stats = engine.iterative_deepening(st.session_state.board)
+            st.session_state.last_engine_stats = stats
     
     if move:
         make_move(move)
@@ -107,24 +110,28 @@ def engine_move():
 
 def get_eval_percentage(score):
     """Convert centipawn score to percentage for eval bar."""
-    # Clamp score between -1000 and 1000 for display
     clamped = max(-1000, min(1000, score))
-    # Convert to 0-100 percentage (50 = equal)
     percentage = 50 + (clamped / 20)
     return max(0, min(100, percentage))
 
 
+def get_current_eval():
+    """Get evaluation from current engine."""
+    if st.session_state.engine_type == "heuristic":
+        return evaluate_board(st.session_state.board)
+    else:
+        engine = get_engine()
+        return engine.evaluate_position(st.session_state.board)
+
+
 def render_board_svg(board, size=400):
     """Render the chess board as SVG."""
-    # Flip board if player is black
     flipped = st.session_state.player_color == chess.BLACK
     
-    # Highlight last move
     lastmove = None
     if board.move_stack:
         lastmove = board.peek()
     
-    # Check square
     check = None
     if board.is_check():
         check = board.king(board.turn)
@@ -146,21 +153,30 @@ def render_board_svg(board, size=400):
 
 
 # Main layout
-st.title("♟️ Chess Engine - Minimax with Alpha-Beta Pruning")
-st.markdown("Play against an AI using adversarial search algorithms!")
+st.title("♟️ Chess Engine — Foundations of AI")
 
 # Sidebar for settings
 with st.sidebar:
     st.header("⚙️ Settings")
     
-    # Engine depth
-    depth = st.slider("Search Depth", 1, 6, 4, 
-                      help="Higher = stronger but slower")
-    st.session_state.engine.max_depth = depth
+    # Engine selection
+    st.subheader("Select Engine")
+    engine_choice = st.radio(
+        "Play against:",
+        ["Heuristic Engine (Phase 1)", "Neural Network Engine (Phase 2)"],
+        index=0 if st.session_state.engine_type == "heuristic" else 1
+    )
     
-    # Time limit
-    time_limit = st.slider("Time Limit (seconds)", 1, 30, 5)
-    st.session_state.engine.time_limit = time_limit
+    new_type = "heuristic" if "Heuristic" in engine_choice else "neural"
+    if new_type != st.session_state.engine_type:
+        switch_engine(new_type)
+        st.rerun()
+    
+    # Engine info box
+    if st.session_state.engine_type == "heuristic":
+        st.info("**Heuristic Engine**\n\nUses handcrafted evaluation:\n- Material counting\n- Piece-square tables\n- Pawn structure\n- King safety\n- Mobility")
+    else:
+        st.info("**Neural Network Engine**\n\nUses learned evaluation:\n- Trained on 400k positions\n- 3-layer MLP (512→256→128)\n- Learned from game outcomes")
     
     st.divider()
     
@@ -181,22 +197,23 @@ with st.sidebar:
     
     st.divider()
     
-    # Evaluation breakdown
+    # Evaluation breakdown (only for heuristic)
     st.header("📊 Position Analysis")
-    breakdown = get_evaluation_breakdown(st.session_state.board)
     
-    st.metric("Total Evaluation", f"{breakdown['total'] / 100:.2f}")
+    eval_score = get_current_eval()
+    st.metric("Evaluation", f"{eval_score / 100:+.2f}")
     
-    with st.expander("Detailed Breakdown"):
-        st.write(f"Material: {breakdown['material'] / 100:.2f}")
-        st.write(f"Piece Position: {breakdown['piece_position'] / 100:.2f}")
-        st.write(f"Pawn Structure: {breakdown['pawn_structure'] / 100:.2f}")
-        st.write(f"King Safety: {breakdown['king_safety'] / 100:.2f}")
-        st.write(f"Mobility: {breakdown['mobility'] / 100:.2f}")
-        st.write(f"Center Control: {breakdown['center_control'] / 100:.2f}")
-        st.write(f"Rook Placement: {breakdown['rook_placement'] / 100:.2f}")
-        st.write(f"Bishop Pair: {breakdown['bishop_pair'] / 100:.2f}")
-        st.write(f"Phase: {'Endgame' if breakdown['is_endgame'] else 'Middlegame'}")
+    if st.session_state.engine_type == "heuristic":
+        with st.expander("Detailed Breakdown"):
+            breakdown = get_evaluation_breakdown(st.session_state.board)
+            st.write(f"Material: {breakdown['material'] / 100:+.2f}")
+            st.write(f"Piece Position: {breakdown['piece_position'] / 100:+.2f}")
+            st.write(f"Pawn Structure: {breakdown['pawn_structure'] / 100:+.2f}")
+            st.write(f"King Safety: {breakdown['king_safety'] / 100:+.2f}")
+            st.write(f"Mobility: {breakdown['mobility'] / 100:+.2f}")
+            st.write(f"Center Control: {breakdown['center_control'] / 100:+.2f}")
+            st.write(f"Rook Placement: {breakdown['rook_placement'] / 100:+.2f}")
+            st.write(f"Bishop Pair: {breakdown['bishop_pair'] / 100:+.2f}")
 
 # Main game area
 col1, col2, col3 = st.columns([1, 2, 1])
@@ -205,10 +222,8 @@ col1, col2, col3 = st.columns([1, 2, 1])
 with col1:
     st.subheader("Evaluation")
     
-    eval_score = evaluate_board(st.session_state.board)
+    eval_score = get_current_eval()
     eval_pct = get_eval_percentage(eval_score)
-    
-    # Create eval bar using progress bar
     white_pct = eval_pct
     
     st.markdown(f"""
@@ -230,14 +245,19 @@ with col1:
         stats = st.session_state.last_engine_stats
         st.markdown("---")
         st.caption("Last Search Stats")
-        st.write(f"Depth: {stats.get('depth_reached', 0)}")
+        st.write(f"Depth: {stats.get('depth_reached', stats.get('depth', 0))}")
         st.write(f"Nodes: {stats.get('nodes', 0):,}")
+        if 'nn_calls' in stats:
+            st.write(f"NN Calls: {stats.get('nn_calls', 0):,}")
         st.write(f"Time: {stats.get('time', 0):.2f}s")
-        st.write(f"NPS: {stats.get('nps', 0):,}")
 
 # Chess board (center)
 with col2:
     board = st.session_state.board
+    
+    # Engine type indicator
+    engine_name = "Heuristic" if st.session_state.engine_type == "heuristic" else "Neural Network"
+    st.caption(f"Playing against: **{engine_name} Engine**")
     
     # Display game status
     if board.is_game_over():
@@ -246,13 +266,13 @@ with col2:
             winner = "Black" if board.turn == chess.WHITE else "White"
             st.success(f"🏆 Checkmate! {winner} wins!")
         elif board.is_stalemate():
-            st.info("🤝 Stalemate - Draw!")
+            st.info("🤝 Stalemate — Draw!")
         elif board.is_insufficient_material():
-            st.info("🤝 Insufficient material - Draw!")
+            st.info("🤝 Insufficient material — Draw!")
         elif board.is_fifty_moves():
-            st.info("🤝 Fifty-move rule - Draw!")
+            st.info("🤝 Fifty-move rule — Draw!")
         elif board.is_repetition():
-            st.info("🤝 Threefold repetition - Draw!")
+            st.info("🤝 Threefold repetition — Draw!")
     elif board.is_check():
         st.warning("⚠️ Check!")
     
@@ -268,12 +288,11 @@ with col2:
     
     if not board.is_game_over():
         if is_player_turn:
-            st.markdown("**Your turn!** Enter your move:")
+            st.markdown("**Your turn!** Select your move:")
             
             col_a, col_b = st.columns([3, 1])
             
             with col_a:
-                # Get legal moves for autocomplete
                 legal_moves = [board.san(m) for m in board.legal_moves]
                 move_input = st.selectbox(
                     "Select move",
@@ -317,8 +336,6 @@ with col3:
             if st.session_state.board.move_stack:
                 st.session_state.board.pop()
                 st.session_state.move_history.pop()
-                if st.session_state.evaluation_history:
-                    st.session_state.evaluation_history.pop()
                 st.rerun()
     else:
         st.info("No moves yet. Start playing!")
@@ -337,7 +354,6 @@ with col3:
                 new_board = chess.Board(fen_input)
                 st.session_state.board = new_board
                 st.session_state.move_history = []
-                st.session_state.evaluation_history = []
                 st.rerun()
             except ValueError:
                 st.error("Invalid FEN!")
@@ -346,8 +362,8 @@ with col3:
 st.divider()
 st.markdown("""
 <div style="text-align: center; color: #666;">
-    <p>Chess Engine using Minimax + Alpha-Beta Pruning | Built for Foundations of AI</p>
-    <p>Features: Iterative Deepening • Move Ordering • Quiescence Search • Transposition Tables</p>
+    <p><strong>Chess Engine — Foundations of AI Project</strong></p>
+    <p>Phase 1: Minimax + Alpha-Beta + Heuristics | Phase 2: Neural Network Evaluation</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -356,6 +372,5 @@ if not board.is_game_over() and not is_player_turn and st.session_state.game_sta
     engine_move()
     st.rerun()
 
-# Mark game as started after first render
 if not st.session_state.game_started:
     st.session_state.game_started = True
