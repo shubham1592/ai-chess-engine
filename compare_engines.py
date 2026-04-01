@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Mar 19 22:25:57 2026
-
-@author: righley
-"""
-
 """
 Compare Heuristic Engine vs Neural Network Engine.
 Plays games between the two engines to see which performs better.

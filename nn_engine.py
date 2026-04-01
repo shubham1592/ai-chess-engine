@@ -20,7 +20,7 @@ from move_ordering import order_moves, get_quiescence_moves
 class NNEngine:
     """Chess engine using neural network evaluation."""
     
-    def __init__(self, weights_path="nn/weights.pth", max_depth=3, time_limit=10.0, device=None):
+    def __init__(self, weights_path="nn/weights_stockfish.pth", max_depth=3, time_limit=10.0, device=None):
         """
         Args:
             weights_path: Path to trained model weights
@@ -63,8 +63,8 @@ class NNEngine:
     
     def nn_evaluate(self, board):
         """
-        Evaluate position using neural network.
-        Returns score in centipawns (scaled from [-1,1] to [-1000, 1000]).
+        Evaluate position using neural network + material bonus.
+        Returns score in centipawns.
         """
         # Check cache first
         fen = board.fen()
@@ -77,17 +77,44 @@ class NNEngine:
         tensor = torch.tensor(board_to_tensor(board), dtype=torch.float32)
         tensor = tensor.to(self.device)
         
-        # Get evaluation
+        # Get NN evaluation
         with torch.no_grad():
-            score = self.model.evaluate(tensor)
+            nn_score = self.model.evaluate(tensor)
         
-        # Scale from [-1, 1] to centipawns [-1000, 1000]
-        score_cp = score * 1000
+        # Scale NN score from [-1, 1] to centipawns [-1000, 1000]
+        nn_score_cp = nn_score * 1000
+        
+        # Add material counting (helps with tactics)
+        material_score = self._count_material(board)
+        
+        # Combine: 70% NN + 30% material
+        combined_score = (0.7 * nn_score_cp) + (0.3 * material_score)
         
         # Cache result
-        self.eval_cache[fen] = score_cp
+        self.eval_cache[fen] = combined_score
         
-        return score_cp
+        return combined_score
+    
+    def _count_material(self, board):
+        """Simple material counting in centipawns."""
+        import chess
+        
+        piece_values = {
+            chess.PAWN: 100,
+            chess.KNIGHT: 320,
+            chess.BISHOP: 330,
+            chess.ROOK: 500,
+            chess.QUEEN: 900,
+            chess.KING: 0
+        }
+        
+        score = 0
+        for piece_type in piece_values:
+            white_count = len(board.pieces(piece_type, chess.WHITE))
+            black_count = len(board.pieces(piece_type, chess.BLACK))
+            score += piece_values[piece_type] * (white_count - black_count)
+        
+        return score
     
     def quiescence_search(self, board, alpha, beta, depth=0):
         """
@@ -266,8 +293,8 @@ if __name__ == "__main__":
     print("Neural Network Chess Engine Test")
     print("="*50)
     
-    # Create engine (force CPU to avoid CUDA issues)
-    engine = NNEngine(weights_path="nn/weights.pth", max_depth=3, device='cpu')
+    # Create engine (using new Stockfish-trained weights)
+    engine = NNEngine(weights_path="nn/weights_stockfish.pth", max_depth=3, device='cpu')
     
     # Test on starting position
     board = chess.Board()

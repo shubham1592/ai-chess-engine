@@ -1,0 +1,16 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environments
+.venv/
+env/
+
+# Large data files
+data/games.pgn
+data/positions.npz
+
+# Streamlit
+.streamlit/
+X
+
