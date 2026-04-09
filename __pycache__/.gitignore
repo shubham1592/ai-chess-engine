@@ -1,16 +1,14 @@
-# Python caches
+# Python cache
 __pycache__/
 *.py[cod]
 
-# Environments (if you use venv or conda)
+# Environments
 .venv/
 env/
 
-# ML/Data (Crucial for Phase 2)
-*.pgn
-*.pt
-*.pth
-data/
+# Large data files
+data/games.pgn
+data/positions.npz
 
 # Streamlit
 .streamlit/
