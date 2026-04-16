@@ -435,7 +435,7 @@ Reduce the search depth in the sidebar (web) or edit `max_depth` in the code.
 
 ## Authors
 
-Shubham Kumar  
+Shubham Kumar and Amrita Singh
 Foundations of Artificial Intelligence  
 Northeastern University  
 Spring 2026
