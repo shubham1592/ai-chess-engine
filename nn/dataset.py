@@ -1,145 +1,127 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Created on Thu Mar 19 22:05:40 2026
+Neural Network Model for Chess Position Evaluation
 
-@author: righley
+This defines a simple feedforward network (MLP) that takes a chess position
+as input and outputs an evaluation score. The architecture is:
+
+    Input (773) → Hidden (512) → Hidden (256) → Hidden (128) → Output (1)
+
+Each hidden layer uses BatchNorm, ReLU activation, and Dropout for regularization.
+The output uses Tanh to squash the score to [-1, +1] range.
 """
 
-"""
-Dataset utilities for chess neural network.
-Handles board encoding and data loading.
-"""
-
-import chess
-import numpy as np
 import torch
-from torch.utils.data import Dataset
+import torch.nn as nn
 
 
-def board_to_tensor(board):
+class ChessEvaluationNet(nn.Module):
     """
-    Convert a chess.Board to a 773-dimensional tensor.
+    Multi-Layer Perceptron for evaluating chess positions.
     
-    Encoding:
-        - Indices 0-63:    White Pawns
-        - Indices 64-127:  White Knights
-        - Indices 128-191: White Bishops
-        - Indices 192-255: White Rooks
-        - Indices 256-319: White Queens
-        - Indices 320-383: White King
-        - Indices 384-447: Black Pawns
-        - Indices 448-511: Black Knights
-        - Indices 512-575: Black Bishops
-        - Indices 576-639: Black Rooks
-        - Indices 640-703: Black Queens
-        - Indices 704-767: Black King
-        - Index 768:       Side to move (1=White, 0=Black)
-        - Indices 769-772: Castling rights (WK, WQ, BK, BQ)
+    Takes a 773-dimensional binary vector representing the board state
+    and outputs a single score between -1 (Black winning) and +1 (White winning).
     
-    Args:
-        board: chess.Board object
-    
-    Returns:
-        numpy array of shape (773,) with float32 values
-    """
-    tensor = np.zeros(773, dtype=np.float32)
-    
-    # Piece placement (12 piece types x 64 squares = 768 values)
-    piece_order = [
-        (chess.PAWN, chess.WHITE),    # 0-63
-        (chess.KNIGHT, chess.WHITE),  # 64-127
-        (chess.BISHOP, chess.WHITE),  # 128-191
-        (chess.ROOK, chess.WHITE),    # 192-255
-        (chess.QUEEN, chess.WHITE),   # 256-319
-        (chess.KING, chess.WHITE),    # 320-383
-        (chess.PAWN, chess.BLACK),    # 384-447
-        (chess.KNIGHT, chess.BLACK),  # 448-511
-        (chess.BISHOP, chess.BLACK),  # 512-575
-        (chess.ROOK, chess.BLACK),    # 576-639
-        (chess.QUEEN, chess.BLACK),   # 640-703
-        (chess.KING, chess.BLACK),    # 704-767
-    ]
-    
-    for i, (piece_type, color) in enumerate(piece_order):
-        for square in board.pieces(piece_type, color):
-            tensor[i * 64 + square] = 1.0
-    
-    # Side to move
-    tensor[768] = 1.0 if board.turn == chess.WHITE else 0.0
-    
-    # Castling rights
-    tensor[769] = 1.0 if board.has_kingside_castling_rights(chess.WHITE) else 0.0
-    tensor[770] = 1.0 if board.has_queenside_castling_rights(chess.WHITE) else 0.0
-    tensor[771] = 1.0 if board.has_kingside_castling_rights(chess.BLACK) else 0.0
-    tensor[772] = 1.0 if board.has_queenside_castling_rights(chess.BLACK) else 0.0
-    
-    return tensor
-
-
-def result_to_label(result, board_turn_was_white):
-    """
-    Convert game result string to a label.
-    
-    Labels are from White's perspective:
-        White wins: +1
-        Draw:        0
-        Black wins: -1
-    
-    Args:
-        result: String like "1-0", "0-1", or "1/2-1/2"
-        board_turn_was_white: Whose turn it was (not used here, but kept for flexibility)
-    
-    Returns:
-        float: +1, 0, or -1
-    """
-    if result == "1-0":
-        return 1.0   # White wins
-    elif result == "0-1":
-        return -1.0  # Black wins
-    else:
-        return 0.0   # Draw
-
-
-class ChessDataset(Dataset):
-    """
-    PyTorch Dataset for chess positions.
-    
-    Loads pre-processed numpy arrays of positions and labels.
+    Why this architecture:
+    - MLP is simpler and faster than CNN for this task
+    - 3 hidden layers is enough to learn complex patterns
+    - Decreasing layer sizes (512→256→128) compress information gradually
+    - Dropout prevents overfitting to training positions
+    - BatchNorm makes training more stable
     """
     
-    def __init__(self, positions_file):
+    def __init__(self, input_size=773, hidden_sizes=[512, 256, 128], dropout=0.2):
         """
-        Args:
-            positions_file: Path to .npz file containing 'positions' and 'labels'
-        """
-        data = np.load(positions_file)
-        self.positions = torch.tensor(data['positions'], dtype=torch.float32)
-        self.labels = torch.tensor(data['labels'], dtype=torch.float32)
+        Build the network layers.
         
-        print(f"Loaded {len(self.positions)} positions from {positions_file}")
+        Args:
+            input_size: 773 for our board encoding (12*64 pieces + 5 extra features)
+            hidden_sizes: Neurons in each hidden layer
+            dropout: Probability of dropping neurons during training
+        """
+        super(ChessEvaluationNet, self).__init__()
+        
+        # Build layers dynamically
+        layers = []
+        prev_size = input_size
+        
+        for hidden_size in hidden_sizes:
+            layers.append(nn.Linear(prev_size, hidden_size))
+            layers.append(nn.BatchNorm1d(hidden_size))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+            prev_size = hidden_size
+        
+        # Final output layer: single neuron with tanh activation
+        layers.append(nn.Linear(prev_size, 1))
+        layers.append(nn.Tanh())
+        
+        self.network = nn.Sequential(*layers)
     
-    def __len__(self):
-        return len(self.positions)
+    def forward(self, x):
+        """
+        Run a batch of positions through the network.
+        
+        Args:
+            x: Tensor of shape (batch_size, 773)
+        
+        Returns:
+            Tensor of shape (batch_size, 1) with scores in [-1, +1]
+        """
+        return self.network(x)
     
-    def __getitem__(self, idx):
-        return self.positions[idx], self.labels[idx]
+    def evaluate(self, x):
+        """
+        Evaluate a single position (convenience method for inference).
+        
+        Args:
+            x: Tensor of shape (773,) representing one position
+        
+        Returns:
+            Float score between -1 and +1
+        """
+        self.eval()
+        with torch.no_grad():
+            x = x.unsqueeze(0)  # Add batch dimension: (773,) → (1, 773)
+            output = self.forward(x)
+            return output.item()
+
+
+def count_parameters(model):
+    """Count trainable parameters in the model."""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 # Quick test
 if __name__ == "__main__":
-    # Test board_to_tensor with starting position
-    board = chess.Board()
-    tensor = board_to_tensor(board)
+    print("="*50)
+    print("Chess Evaluation Neural Network")
+    print("="*50)
     
-    print(f"Tensor shape: {tensor.shape}")
-    print(f"Non-zero elements: {np.count_nonzero(tensor)}")
-    print(f"Side to move (White=1): {tensor[768]}")
-    print(f"Castling rights: {tensor[769:773]}")
+    # Create model
+    model = ChessEvaluationNet()
     
-    # Verify some pieces
-    print(f"\nWhite pawns (indices 8-15 should be 1):")
-    print(f"  {tensor[8:16]}")
+    # Print architecture
+    print("\nArchitecture:")
+    print(model)
     
-    print(f"\nWhite king on e1 (index 320+4=324 should be 1):")
-    print(f"  Index 324 = {tensor[324]}")
+    # Count parameters
+    num_params = count_parameters(model)
+    print(f"\nTotal trainable parameters: {num_params:,}")
+    
+    # Test forward pass with random input
+    print("\nTesting forward pass...")
+    batch_size = 32
+    dummy_input = torch.randn(batch_size, 773)
+    output = model(dummy_input)
+    
+    print(f"Input shape:  {dummy_input.shape}")
+    print(f"Output shape: {output.shape}")
+    print(f"Output range: [{output.min().item():.3f}, {output.max().item():.3f}]")
+    
+    # Test single position evaluation
+    print("\nTesting single position evaluation...")
+    single_input = torch.randn(773)
+    score = model.evaluate(single_input)
+    print(f"Single position score: {score:.4f}")
+    
+    print("\nModel test passed!")
