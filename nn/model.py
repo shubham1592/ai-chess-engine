@@ -1,14 +1,13 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Created on Thu Mar 19 22:05:40 2026
+Neural Network Model for Chess Position Evaluation
 
-@author: righley
-"""
+This defines a simple feedforward network (MLP) that takes a chess position
+as input and outputs an evaluation score. The architecture is:
 
-"""
-Neural Network Model for Chess Position Evaluation.
-Simple MLP architecture that takes board tensor and outputs evaluation score.
+    Input (773) → Hidden (512) → Hidden (256) → Hidden (128) → Output (1)
+
+Each hidden layer uses BatchNorm, ReLU activation, and Dropout for regularization.
+The output uses Tanh to squash the score to [-1, +1] range.
 """
 
 import torch
@@ -17,24 +16,31 @@ import torch.nn as nn
 
 class ChessEvaluationNet(nn.Module):
     """
-    Multi-Layer Perceptron for chess position evaluation.
+    Multi-Layer Perceptron for evaluating chess positions.
     
-    Architecture:
-        Input:  773 neurons (board representation)
-        Hidden: 512 -> 256 -> 128 neurons with ReLU
-        Output: 1 neuron with Tanh (score between -1 and +1)
+    Takes a 773-dimensional binary vector representing the board state
+    and outputs a single score between -1 (Black winning) and +1 (White winning).
+    
+    Why this architecture:
+    - MLP is simpler and faster than CNN for this task
+    - 3 hidden layers is enough to learn complex patterns
+    - Decreasing layer sizes (512→256→128) compress information gradually
+    - Dropout prevents overfitting to training positions
+    - BatchNorm makes training more stable
     """
     
     def __init__(self, input_size=773, hidden_sizes=[512, 256, 128], dropout=0.2):
         """
+        Build the network layers.
+        
         Args:
-            input_size: Size of input tensor (773 for our encoding)
-            hidden_sizes: List of hidden layer sizes
-            dropout: Dropout probability for regularization
+            input_size: 773 for our board encoding (12*64 pieces + 5 extra features)
+            hidden_sizes: Neurons in each hidden layer
+            dropout: Probability of dropping neurons during training
         """
         super(ChessEvaluationNet, self).__init__()
         
-        # Build layers
+        # Build layers dynamically
         layers = []
         prev_size = input_size
         
@@ -45,43 +51,43 @@ class ChessEvaluationNet(nn.Module):
             layers.append(nn.Dropout(dropout))
             prev_size = hidden_size
         
-        # Output layer
+        # Final output layer: single neuron with tanh activation
         layers.append(nn.Linear(prev_size, 1))
-        layers.append(nn.Tanh())  # Output between -1 and +1
+        layers.append(nn.Tanh())
         
         self.network = nn.Sequential(*layers)
     
     def forward(self, x):
         """
-        Forward pass.
+        Run a batch of positions through the network.
         
         Args:
             x: Tensor of shape (batch_size, 773)
         
         Returns:
-            Tensor of shape (batch_size, 1) with values in [-1, +1]
+            Tensor of shape (batch_size, 1) with scores in [-1, +1]
         """
         return self.network(x)
     
     def evaluate(self, x):
         """
-        Evaluate a single position (no batch dimension).
+        Evaluate a single position (convenience method for inference).
         
         Args:
-            x: Tensor of shape (773,)
+            x: Tensor of shape (773,) representing one position
         
         Returns:
-            Float evaluation score in [-1, +1]
+            Float score between -1 and +1
         """
         self.eval()
         with torch.no_grad():
-            x = x.unsqueeze(0)  # Add batch dimension
+            x = x.unsqueeze(0)  # Add batch dimension: (773,) → (1, 773)
             output = self.forward(x)
             return output.item()
 
 
 def count_parameters(model):
-    """Count total trainable parameters in the model."""
+    """Count trainable parameters in the model."""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
