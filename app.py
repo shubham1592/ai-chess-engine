@@ -1,6 +1,8 @@
 """
 Streamlit Frontend for Chess Engine
 Play against Heuristic AI or Neural Network AI
+
+Run with: streamlit run app.py
 """
 
 import streamlit as st
@@ -176,7 +178,17 @@ with st.sidebar:
     if st.session_state.engine_type == "heuristic":
         st.info("**Heuristic Engine**\n\nUses handcrafted evaluation:\n- Material counting\n- Piece-square tables\n- Pawn structure\n- King safety\n- Mobility")
     else:
-        st.info("**Neural Network Engine**\n\nUses learned evaluation:\n- Trained on 400k positions\n- 3-layer MLP (512→256→128)\n- Learned from game outcomes")
+        st.info("**Neural Network Engine**\n\nUses learned evaluation:\n- Trained on 300k positions\n- 3-layer MLP (512→256→128)\n- Stockfish-labeled data")
+    
+    st.divider()
+    
+    # Depth setting
+    st.subheader("Search Settings")
+    depth = st.slider("Search Depth", min_value=1, max_value=5, value=3, 
+                      help="Higher depth = stronger play but slower")
+    
+    if st.session_state.engine is not None:
+        st.session_state.engine.max_depth = depth
     
     st.divider()
     
