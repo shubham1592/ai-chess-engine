@@ -1,6 +1,12 @@
 """
-Neural Network Chess Engine.
-Uses trained neural network for position evaluation with Minimax search.
+Neural Network Chess Engine
+
+This engine uses a trained neural network to evaluate positions instead of
+handcrafted heuristics. The NN was trained on ~300k positions labeled by
+Stockfish, so it learned evaluation patterns from a strong engine.
+
+We combine the NN score with simple material counting (70/30 split) to
+prevent tactical blunders while keeping the NN's positional understanding.
 """
 
 import chess
@@ -8,7 +14,7 @@ import torch
 import time
 import os
 
-# Add parent directory to path for imports
+# Add parent directory to path so we can import from nn/
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -18,38 +24,46 @@ from move_ordering import order_moves, get_quiescence_moves
 
 
 class NNEngine:
-    """Chess engine using neural network evaluation."""
+    """
+    Chess engine that uses a neural network for position evaluation.
+    
+    The NN outputs a score between -1 (Black winning) and +1 (White winning).
+    We scale this to centipawns and mix it with material counting for safety.
+    """
     
     def __init__(self, weights_path="nn/weights_stockfish.pth", max_depth=3, time_limit=10.0, device=None):
         """
+        Load the trained neural network and set up search parameters.
+        
         Args:
-            weights_path: Path to trained model weights
-            max_depth: Maximum search depth
-            time_limit: Time limit per move in seconds
-            device: 'cuda' or 'cpu' (auto-detected if None)
+            weights_path: Path to the saved model weights
+            max_depth: How many moves ahead to search (lower than heuristic engine
+                       because NN inference is slower)
+            time_limit: Max seconds per move
+            device: 'cuda' or 'cpu' (defaults to cpu for stability)
         """
-        # Set device (default to CPU for stability)
+        # Use CPU by default to avoid CUDA issues
         if device is None:
             self.device = 'cpu'
         else:
             self.device = device
         
-        # Load model
+        # Load the trained model
         self.model = ChessEvaluationNet()
         self.model.load_state_dict(torch.load(weights_path, map_location='cpu', weights_only=True))
         self.model = self.model.to(self.device)
-        self.model.eval()
+        self.model.eval()  # Set to evaluation mode (disables dropout)
         
         self.max_depth = max_depth
         self.time_limit = time_limit
         
-        # Stats
+        # Search statistics
         self.nodes_searched = 0
         self.nn_calls = 0
         self.start_time = None
         self.time_exceeded = False
         
-        # Cache for evaluated positions
+        # Cache evaluated positions to avoid redundant NN calls
         self.eval_cache = {}
         
         print(f"NN Engine initialized on {self.device}")
@@ -63,40 +77,52 @@ class NNEngine:
     
     def nn_evaluate(self, board):
         """
-        Evaluate position using neural network + material bonus.
-        Returns score in centipawns.
+        Evaluate a position using neural network + material counting.
+        
+        We use a 70/30 split between NN and material. This hybrid approach
+        works better than pure NN because:
+        - NN provides positional understanding learned from Stockfish
+        - Material counting prevents obvious blunders (taking free pieces)
+        
+        Returns:
+            Score in centipawns (positive = White better)
         """
-        # Check cache first
+        # Check cache first to avoid redundant NN calls
         fen = board.fen()
         if fen in self.eval_cache:
             return self.eval_cache[fen]
         
         self.nn_calls += 1
         
-        # Convert board to tensor
+        # Convert board to tensor format the NN expects
         tensor = torch.tensor(board_to_tensor(board), dtype=torch.float32)
         tensor = tensor.to(self.device)
         
-        # Get NN evaluation
+        # Get NN evaluation (returns value between -1 and +1)
         with torch.no_grad():
             nn_score = self.model.evaluate(tensor)
         
-        # Scale NN score from [-1, 1] to centipawns [-1000, 1000]
+        # Scale NN output to centipawns (roughly -1000 to +1000)
         nn_score_cp = nn_score * 1000
         
-        # Add material counting (helps with tactics)
+        # Count material as a safety check
         material_score = self._count_material(board)
         
-        # Combine: 70% NN + 30% material
+        # Combine: 70% NN judgment + 30% material safety
         combined_score = (0.7 * nn_score_cp) + (0.3 * material_score)
         
-        # Cache result
+        # Cache for later
         self.eval_cache[fen] = combined_score
         
         return combined_score
     
     def _count_material(self, board):
-        """Simple material counting in centipawns."""
+        """
+        Simple material counting in centipawns.
+        
+        This is much simpler than our full heuristic evaluation but catches
+        obvious material imbalances that the NN might miss.
+        """
         import chess
         
         piece_values = {
