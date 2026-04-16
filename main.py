@@ -2,11 +2,11 @@
 Chess Engine - Main Entry Point
 Foundations of AI Project
 
-This module provides command-line interface for testing the chess engine.
+This module provides a command-line interface for testing the chess engine.
 For the GUI, run: streamlit run app.py
 """
 
-import
+import chess
 from engine import ChessEngine, RandomEngine, GreedyEngine, play_game
 from evaluation import evaluate_board, get_evaluation_breakdown
 
@@ -222,7 +222,7 @@ def analyze_position():
     print(f"  Pawn Structure:{breakdown['pawn_structure']/100:+.2f}")
     print(f"  King Safety:   {breakdown['king_safety']/100:+.2f}")
     print(f"  Mobility:      {breakdown['mobility']/100:+.2f}")
-    print(f"  Center:        {break12.60down['center_control']/100:+.2f}")
+    print(f"  Center:        {breakdown['center_control']/100:+.2f}")
     print(f"  Rooks:         {breakdown['rook_placement']/100:+.2f}")
     print(f"  Bishop Pair:   {breakdown['bishop_pair']/100:+.2f}")
     print(f"  TOTAL:         {breakdown['total']/100:+.2f}")
