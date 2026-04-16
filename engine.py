@@ -1,5 +1,8 @@
 """
 Chess Engine with Minimax + Alpha-Beta Pruning + Iterative Deepening
+
+This is the core search module. It finds the best move by exploring the game
+tree and evaluating positions using heuristics from evaluation.py.
 """
 
 import chess
@@ -9,19 +12,34 @@ from move_ordering import order_moves, get_quiescence_moves
 
 
 class ChessEngine:
-    """Chess engine using Minimax with Alpha-Beta pruning."""
+    """
+    Chess engine using Minimax search with Alpha-Beta pruning.
+    
+    The engine searches the game tree to find the best move. It uses:
+    - Alpha-Beta pruning to skip irrelevant branches
+    - Iterative deepening to manage search time
+    - Transposition table to cache repeated positions
+    - Quiescence search to handle tactical positions
+    """
     
     def __init__(self, max_depth=4, time_limit=10.0):
+        """
+        Set up the engine with search parameters.
+        
+        Args:
+            max_depth: How many moves ahead to search
+            time_limit: Max seconds to spend per move
+        """
         self.max_depth = max_depth
-        self.time_limit = time_limit  # seconds
+        self.time_limit = time_limit
         self.nodes_searched = 0
         self.start_time = None
         self.time_exceeded = False
         
-        # Transposition table for caching positions
+        # Cache for positions we've already evaluated
         self.transposition_table = {}
         
-        # Stats for analysis
+        # Stats for debugging and display
         self.stats = {
             'nodes': 0,
             'tt_hits': 0,
